@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>一键打点听力工具</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 20px auto;
+      text-align: center;
+      padding: 0 10px;
+    }
+    button {
+      font-size: 1.1rem;
+      padding: 8px 16px;
+      margin: 5px;
+      border-radius: 8px;
+      border: none;
+      background-color: #4CAF50;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover { background-color: #45a049; }
+    ul { list-style: none; padding: 0; }
+    li { margin: 5px 0; cursor: pointer; color: #007BFF; }
+    li:hover { text-decoration: underline; }
+    input[type=number], input[type=file], input[type=text] {
+      padding: 5px;
+      margin: 5px;
+      font-size: 1rem;
+    }
+    #offsetInput { width: 80px; }
+    .mark-note { width: 60%; padding: 3px; font-size: 0.9rem; }
+    .delete-btn { font-size: 0.8rem; padding: 2px 6px; margin-left:5px; }
+  </style>
+</head>
+<body>
+  <h2>🎧 一键打点听力工具</h2>
+
+  <!-- 文件选择 -->
+  <input type="file" id="fileInput" accept=".mp3,audio/*"><br><br>
+  <audio id="audioPlayer" controls style="width: 100%;"></audio><br>
+
+  <!-- 打点和偏移 -->
+  <button id="markButton">🔖 打点 (Option)</button>
+  <label>偏移秒数: <input type="number" id="offsetInput" value="3" min="0" max="5" step="0.1"></label><br>
+
+  <!-- 快进/回放 -->
+  <button id="rewindButton">⏪ 回放 5 秒</button>
+  <button id="forwardButton">⏩ 快进 5 秒</button><br>
+
+  <!-- 导入导出 -->
+  <button id="exportButton">💾 导出打点</button>
+  <input type="file" id="importInput" accept="application/json" style="display:none">
+  <button id="importButton">📂 导入打点</button>
+
+  <h3>标记点：</h3>
+  <ul id="marksList"></ul>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const audioPlayer = document.getElementById('audioPlayer');
+    const markButton = document.getElementById('markButton');
+    const offsetInput = document.getElementById('offsetInput');
+    const marksList = document.getElementById('marksList');
+    const rewindButton = document.getElementById('rewindButton');
+    const forwardButton = document.getElementById('forwardButton');
+    const exportButton = document.getElementById('exportButton');
+    const importButton = document.getElementById('importButton');
+    const importInput = document.getElementById('importInput');
+    const STEP = 5;
+
+    let marks = [];
+    let audioFileName = 'audio';
+
+    // 选择音频
+    fileInput.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      audioFileName = file.name.replace(/\.[^/.]+$/, "");
+      const url = URL.createObjectURL(file);
+      audioPlayer.src = url;
+      audioPlayer.load();
+      marks = [];
+      marksList.innerHTML = '';
+    });
+
+    // 添加打点
+    function addMark() {
+      if (!audioPlayer.src) return;
+      const offset = parseFloat(offsetInput.value) || 0;
+      const time = Math.max(0, audioPlayer.currentTime - offset);
+      marks.push({time, note: ''});
+      renderMarks();
+    }
+    markButton.addEventListener('click', addMark);
+
+    // 快捷键监听
+    document.addEventListener('keydown', e => {
+      if (e.key === ' ') { e.preventDefault(); audioPlayer.paused ? audioPlayer.play() : audioPlayer.pause(); }
+      if (e.key === 'Alt') addMark();
+      if (e.key === 'ArrowLeft') audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - STEP);
+      if (e.key === 'ArrowRight') audioPlayer.currentTime = Math.min(audioPlayer.duration, audioPlayer.currentTime + STEP);
+    });
+
+    // 快进/回放
+    rewindButton.addEventListener('click', () => { audioPlayer.currentTime = Math.max(0, audioPlayer.currentTime - STEP); });
+    forwardButton.addEventListener('click', () => { audioPlayer.currentTime = Math.min(audioPlayer.duration, audioPlayer.currentTime + STEP); });
+
+    // 导出打点
+    exportButton.addEventListener('click', () => {
+      const dataStr = JSON.stringify(marks, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = audioFileName + '_打点.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // 导入打点
+    importButton.addEventListener('click', () => importInput.click());
+    importInput.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          if(Array.isArray(data)) marks = data; else marks = [];
+          renderMarks();
+        } catch {
+          alert('文件格式错误');
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    // 渲染标记列表
+    function renderMarks() {
+      marksList.innerHTML = '';
+      marks.forEach((m, i) => {
+        const li = document.createElement('li');
+        li.innerHTML = `
+          标记 ${i+1} - ${formatTime(m.time)}
+          <input type="text" class="mark-note" placeholder="记录你的疑问" value="${m.note || ''}">
+          <button class="delete-btn">删除</button>
+        `;
+        const noteInput = li.querySelector('.mark-note');
+        noteInput.addEventListener('input', e => { m.note = e.target.value; });
+        li.querySelector('.delete-btn').addEventListener('click', () => { marks.splice(i,1); renderMarks(); });
+        li.addEventListener('click', e => {
+          if(e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
+            audioPlayer.currentTime = m.time; audioPlayer.play();
+          }
+        });
+        marksList.appendChild(li);
+      });
+    }
+
+    function formatTime(s) {
+      const min = Math.floor(s/60), sec = Math.floor(s%60);
+      return `${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+    }
+  </script>
+</body>
+</html>
